@@ -1,0 +1,11 @@
+[package]
+name = "mary"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.4.6", features = ["derive"] }
+lexgen = "0.15"
+lexgen_util = "0.15"
+pomelo = "0.1"
+thiserror = "1"
