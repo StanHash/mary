@@ -511,6 +511,14 @@ impl Emit {
                 }
             }
 
+            Stmt::Expr(expr) => {
+                if let Err(err) = self.expr(scope, expr) {
+                    self.err.push(err);
+                }
+
+                self.vec.push(Ins::Discard);
+            }
+
             Stmt::Call(invoke) => match scope.lookup_name(&invoke.func) {
                 Some(NameRef::Func(cid)) => {
                     for arg in invoke.args {

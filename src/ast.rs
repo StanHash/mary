@@ -60,6 +60,7 @@ pub enum Stmt {
     Vars(Vec<(String, Option<Expr>)>),
     Consts(Vec<(String, Expr)>),
     Assign(AssignOperation, String, Expr),
+    Expr(Expr),
     Call(Invoke),
     If(Expr, Vec<Stmt>),
     IfElse(Expr, Vec<Stmt>, Vec<Stmt>),

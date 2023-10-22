@@ -170,6 +170,8 @@ pomelo! {
     stmt ::= KwDo stmt_block(b) KwWhile expr(e) { Stmt::DoWhile(b, e) };
     stmt ::= KwFor stmt(h) Semicolon expr(e) Semicolon stmt(t) stmt_block(b) { Stmt::For(h.boxed(), e, t.boxed(), b) };
     stmt ::= KwSwitch expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c) };
+    stmt ::= preincr(e) { Stmt::Expr(e) };
+    stmt ::= postincr(e) { Stmt::Expr(e) };
 
     %type initializers Vec<(String, Option<Expr>)>;
     initializers ::= initializers(mut v) Comma initializer(i) { v.push(i); v };
@@ -253,16 +255,12 @@ pomelo! {
     mul_expr ::= unary_expr;
 
     %type unary_expr Expr;
-    unary_expr ::= PlusPlus Name(n) { Expr::PreIncrement(n) };
-    unary_expr ::= MinusMinus Name(n) { Expr::PreDecrement(n) };
     unary_expr ::= Minus unary_expr(e) { Expr::OpNeg(e.boxed()) };
     unary_expr ::= Plus unary_expr;
     unary_expr ::= Negate unary_expr(e) { Expr::OpNot(e.boxed()) };
     unary_expr ::= postfix_expr;
 
     %type postfix_expr Expr;
-    postfix_expr ::= Name(n) PlusPlus { Expr::PostIncrement(n) };
-    postfix_expr ::= Name(n) MinusMinus { Expr::PostDecrement(n) };
     postfix_expr ::= call(i) { Expr::Call(i) };
     postfix_expr ::= primary_expr;
 
@@ -271,6 +269,16 @@ pomelo! {
     primary_expr ::= Integer(i) { Expr::Int(i) };
     primary_expr ::= StringLit(s) { Expr::Str(s) };
     primary_expr ::= LParen expr RParen;
+    primary_expr ::= LParen postincr RParen;
+    primary_expr ::= LParen preincr RParen;
+
+    %type preincr Expr;
+    preincr ::= PlusPlus Name(n) { Expr::PreIncrement(n) };
+    preincr ::= MinusMinus Name(n) { Expr::PreDecrement(n) };
+
+    %type postincr Expr;
+    postincr ::= Name(n) PlusPlus { Expr::PostIncrement(n) };
+    postincr ::= Name(n) MinusMinus { Expr::PostDecrement(n) };
 }
 
 pub use parser::*;
