@@ -1,6 +1,6 @@
 # mary
 
-This is a script compiler for Harvest Moon: Friends of Mineral Town and Harvest Moon: More Friends of Mineral Town for the GBA.
+This is a script compiler for Harvest Moon: Friends of Mineral Town and Harvest Moon: More Friends of Mineral Town for the GBA. The end goal is for it to be able to recompile decompiled vanilla scripts into the exact same bytecode.
 
 This is a very rough and minimal version that I wrote over the weekend. I think it works, but I haven't had the chance to test or document much of it yet.
 
@@ -12,7 +12,7 @@ If you are looking for my old attempt at writing this in C++, see [StanHash/mary
 
     mary INPUT > OUTPUT
 
-The input is a file written in a custom script syntax. The output is an Event Assembler event defining any scripts with labels to them using the BYTE raw.
+The input is a file written in a custom script syntax. The output is a fragment of C that defines the data objects for the scripts defined in the source file.
 
 ## Build
 
@@ -35,9 +35,9 @@ You will find the mary executable into the target/release directory.
     proc 0x011 Func011(a, b, c)
 
     const CONST_36 = 0x36
-    const MESSAGE = "\xFF is \r\nprengant!\x05"
+    const MESSAGE = "\xFF%is \r\nprengant!\x05"
 
-    script 1 SCRIPT_1
+    script 1 EventScript_1
     {
         var var_0 = Func106()
         var var_1 = CONST_36 + var_0

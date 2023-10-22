@@ -67,19 +67,27 @@ fn main_error() -> Result<(), Error> {
             for (_, name, script) in parse_ctx.scripts {
                 let bytecode = encode_script(&script);
 
-                // print bytecode as very basic EA script for now
+                // print bytecode as C
 
-                println!("ALIGN 4");
-                println!("{name}:");
+                println!("// {name}: length of {0} bytes (+ padding)", bytecode.len());
+                print!("unsigned int const {name}[] = {{");
 
-                println!("    // length: {0} bytes", bytecode.len());
-                print!("    BYTE");
+                for i in 0..(bytecode.len() + 3) / 4 {
+                    let val = u32::from_le_bytes([
+                        bytecode[i * 4],
+                        *bytecode.get(i * 4 + 1).unwrap_or(&0),
+                        *bytecode.get(i * 4 + 2).unwrap_or(&0),
+                        *bytecode.get(i * 4 + 3).unwrap_or(&0),
+                    ]);
 
-                for byte in bytecode {
-                    print!(" 0x{:02X}", byte);
+                    if i % 8 == 0 {
+                        print!("\n   ");
+                    }
+
+                    print!(" 0x{val:08X},");
                 }
 
-                println!();
+                println!("\n}};");
             }
 
             Ok(())
