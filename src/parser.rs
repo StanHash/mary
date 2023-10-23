@@ -167,8 +167,8 @@ pomelo! {
     stmt ::= call(i) { Stmt::Call(i) }
     stmt ::= KwIf expr(e) stmt_block(b) { Stmt::If(e, b) };
     stmt ::= KwIf expr(e) stmt_block(b1) KwElse stmt_block(b2) { Stmt::IfElse(e, b1, b2) };
-    stmt ::= KwDo stmt_block(b) KwWhile expr(e) { Stmt::DoWhile(b, e) };
-    stmt ::= KwFor stmt(h) Semicolon expr(e) Semicolon stmt(t) stmt_block(b) { Stmt::For(h.boxed(), e, t.boxed(), b) };
+    stmt ::= KwDo stmt_block(b) KwWhile expr(e) { Stmt::DoWhile(e,b) };
+    stmt ::= KwFor stmt(h) Semicolon expr(e) Semicolon stmt(t) stmt_block(b) { Stmt::For(Box::new((e, h, t, b))) };
     stmt ::= KwSwitch expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c) };
     stmt ::= preincr(e) { Stmt::Expr(e) };
     stmt ::= postincr(e) { Stmt::Expr(e) };
@@ -224,40 +224,40 @@ pomelo! {
     conditional_expr ::= or_expr;
 
     %type or_expr Expr;
-    or_expr ::= or_expr(a) LOr and_expr(b) { Expr::OpOr(a.boxed(), b.boxed()) };
+    or_expr ::= or_expr(a) LOr and_expr(b) { Expr::OpOr(Box::new((a, b))) };
     or_expr ::= and_expr;
 
     %type and_expr Expr;
-    and_expr ::= and_expr(a) LAnd equality_expr(b) { Expr::OpAnd(a.boxed(), b.boxed()) };
+    and_expr ::= and_expr(a) LAnd equality_expr(b) { Expr::OpAnd(Box::new((a, b))) };
     and_expr ::= equality_expr;
 
     %type equality_expr Expr;
-    equality_expr ::= equality_expr(a) CompareEq relation_expr(b) { Expr::CmpEq(a.boxed(), b.boxed()) };
-    equality_expr ::= equality_expr(a) CompareNe relation_expr(b) { Expr::CmpNe(a.boxed(), b.boxed()) };
+    equality_expr ::= equality_expr(a) CompareEq relation_expr(b) { Expr::CmpEq(Box::new((a, b))) };
+    equality_expr ::= equality_expr(a) CompareNe relation_expr(b) { Expr::CmpNe(Box::new((a, b))) };
     equality_expr ::= relation_expr;
 
     %type relation_expr Expr;
-    relation_expr ::= relation_expr(a) CompareLt add_expr(b) { Expr::CmpLt(a.boxed(), b.boxed()) };
-    relation_expr ::= relation_expr(a) CompareLe add_expr(b) { Expr::CmpLe(a.boxed(), b.boxed()) };
-    relation_expr ::= relation_expr(a) CompareGe add_expr(b) { Expr::CmpGe(a.boxed(), b.boxed()) };
-    relation_expr ::= relation_expr(a) CompareGt add_expr(b) { Expr::CmpGt(a.boxed(), b.boxed()) };
+    relation_expr ::= relation_expr(a) CompareLt add_expr(b) { Expr::CmpLt(Box::new((a, b))) };
+    relation_expr ::= relation_expr(a) CompareLe add_expr(b) { Expr::CmpLe(Box::new((a, b))) };
+    relation_expr ::= relation_expr(a) CompareGe add_expr(b) { Expr::CmpGe(Box::new((a, b))) };
+    relation_expr ::= relation_expr(a) CompareGt add_expr(b) { Expr::CmpGt(Box::new((a, b))) };
     relation_expr ::= add_expr;
 
     %type add_expr Expr;
-    add_expr ::= add_expr(a) Plus mul_expr(b) { Expr::OpAdd(a.boxed(), b.boxed()) };
-    add_expr ::= add_expr(a) Minus mul_expr(b) { Expr::OpSub(a.boxed(), b.boxed()) };
+    add_expr ::= add_expr(a) Plus mul_expr(b) { Expr::OpAdd(Box::new((a, b))) };
+    add_expr ::= add_expr(a) Minus mul_expr(b) { Expr::OpSub(Box::new((a, b))) };
     add_expr ::= mul_expr;
 
     %type mul_expr Expr;
-    mul_expr ::= mul_expr(a) Times unary_expr(b) { Expr::OpMul(a.boxed(), b.boxed()) };
-    mul_expr ::= mul_expr(a) Divide unary_expr(b) { Expr::OpDiv(a.boxed(), b.boxed()) };
-    mul_expr ::= mul_expr(a) Modulus unary_expr(b) { Expr::OpMod(a.boxed(), b.boxed()) };
+    mul_expr ::= mul_expr(a) Times unary_expr(b) { Expr::OpMul(Box::new((a, b))) };
+    mul_expr ::= mul_expr(a) Divide unary_expr(b) { Expr::OpDiv(Box::new((a, b))) };
+    mul_expr ::= mul_expr(a) Modulus unary_expr(b) { Expr::OpMod(Box::new((a, b))) };
     mul_expr ::= unary_expr;
 
     %type unary_expr Expr;
-    unary_expr ::= Minus unary_expr(e) { Expr::OpNeg(e.boxed()) };
+    unary_expr ::= Minus unary_expr(e) { Expr::OpNeg(Box::new(e)) };
     unary_expr ::= Plus unary_expr;
-    unary_expr ::= Negate unary_expr(e) { Expr::OpNot(e.boxed()) };
+    unary_expr ::= Negate unary_expr(e) { Expr::OpNot(Box::new(e)) };
     unary_expr ::= postfix_expr;
 
     %type postfix_expr Expr;

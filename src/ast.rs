@@ -17,32 +17,26 @@ pub enum Expr {
     Name(String),
     Int(IntValue),
     Str(Vec<u8>),
-    OpAdd(Box<Expr>, Box<Expr>),
-    OpSub(Box<Expr>, Box<Expr>),
-    OpMul(Box<Expr>, Box<Expr>),
-    OpDiv(Box<Expr>, Box<Expr>),
-    OpMod(Box<Expr>, Box<Expr>),
-    OpOr(Box<Expr>, Box<Expr>),
-    OpAnd(Box<Expr>, Box<Expr>),
+    OpAdd(Box<(Expr, Expr)>),
+    OpSub(Box<(Expr, Expr)>),
+    OpMul(Box<(Expr, Expr)>),
+    OpDiv(Box<(Expr, Expr)>),
+    OpMod(Box<(Expr, Expr)>),
+    OpOr(Box<(Expr, Expr)>),
+    OpAnd(Box<(Expr, Expr)>),
     OpNeg(Box<Expr>),
     OpNot(Box<Expr>),
     PostIncrement(String),
     PreIncrement(String),
     PostDecrement(String),
     PreDecrement(String),
-    CmpEq(Box<Expr>, Box<Expr>),
-    CmpNe(Box<Expr>, Box<Expr>),
-    CmpLt(Box<Expr>, Box<Expr>),
-    CmpLe(Box<Expr>, Box<Expr>),
-    CmpGe(Box<Expr>, Box<Expr>),
-    CmpGt(Box<Expr>, Box<Expr>),
+    CmpEq(Box<(Expr, Expr)>),
+    CmpNe(Box<(Expr, Expr)>),
+    CmpLt(Box<(Expr, Expr)>),
+    CmpLe(Box<(Expr, Expr)>),
+    CmpGe(Box<(Expr, Expr)>),
+    CmpGt(Box<(Expr, Expr)>),
     Call(Invoke),
-}
-
-impl Expr {
-    pub fn boxed(self) -> Box<Self> {
-        Box::new(self)
-    }
 }
 
 #[derive(Debug)]
@@ -64,15 +58,9 @@ pub enum Stmt {
     Call(Invoke),
     If(Expr, Vec<Stmt>),
     IfElse(Expr, Vec<Stmt>, Vec<Stmt>),
-    For(Box<Stmt>, Expr, Box<Stmt>, Vec<Stmt>),
-    DoWhile(Vec<Stmt>, Expr),
+    For(Box<(Expr, Stmt, Stmt, Vec<Stmt>)>),
+    DoWhile(Expr, Vec<Stmt>),
     Switch(Expr, Vec<SwitchCase>),
-}
-
-impl Stmt {
-    pub fn boxed(self) -> Box<Self> {
-        Box::new(self)
-    }
 }
 
 #[derive(Debug)]
@@ -167,13 +155,13 @@ impl ConstVal {
 
             Expr::Int(i) => Some(Self::Int(*i)),
             Expr::Str(s) => Some(Self::Str(s.clone())),
-            Expr::OpAdd(lhs, rhs) => Self::add(eval(lhs), eval(rhs)),
-            Expr::OpSub(lhs, rhs) => Self::sub(eval(lhs), eval(rhs)),
-            Expr::OpMul(lhs, rhs) => Self::mul(eval(lhs), eval(rhs)),
-            Expr::OpDiv(lhs, rhs) => Self::div(eval(lhs), eval(rhs)),
-            Expr::OpMod(lhs, rhs) => Self::rem(eval(lhs), eval(rhs)),
-            Expr::OpOr(lhs, rhs) => Self::or(eval(lhs), eval(rhs)),
-            Expr::OpAnd(lhs, rhs) => Self::and(eval(lhs), eval(rhs)),
+            Expr::OpAdd(ops) => Self::add(eval(&ops.0), eval(&ops.1)),
+            Expr::OpSub(ops) => Self::sub(eval(&ops.0), eval(&ops.1)),
+            Expr::OpMul(ops) => Self::mul(eval(&ops.0), eval(&ops.1)),
+            Expr::OpDiv(ops) => Self::div(eval(&ops.0), eval(&ops.1)),
+            Expr::OpMod(ops) => Self::rem(eval(&ops.0), eval(&ops.1)),
+            Expr::OpOr(ops) => Self::or(eval(&ops.0), eval(&ops.1)),
+            Expr::OpAnd(ops) => Self::and(eval(&ops.0), eval(&ops.1)),
             Expr::OpNeg(inner) => Self::neg(eval(inner)),
             Expr::OpNot(inner) => Self::not(eval(inner)),
 
@@ -181,12 +169,12 @@ impl ConstVal {
             Expr::PreIncrement(_) => todo!(),  // TODO: error
             Expr::PostDecrement(_) => todo!(), // TODO: error
             Expr::PreDecrement(_) => todo!(),  // TODO: error
-            Expr::CmpEq(_, _) => todo!(),      // TODO
-            Expr::CmpNe(_, _) => todo!(),      // TODO
-            Expr::CmpLt(_, _) => todo!(),      // TODO
-            Expr::CmpLe(_, _) => todo!(),      // TODO
-            Expr::CmpGe(_, _) => todo!(),      // TODO
-            Expr::CmpGt(_, _) => todo!(),      // TODO
+            Expr::CmpEq(_) => todo!(),         // TODO
+            Expr::CmpNe(_) => todo!(),         // TODO
+            Expr::CmpLt(_) => todo!(),         // TODO
+            Expr::CmpLe(_) => todo!(),         // TODO
+            Expr::CmpGe(_) => todo!(),         // TODO
+            Expr::CmpGt(_) => todo!(),         // TODO
             Expr::Call(_) => todo!(),          // TODO: error
         }
     }
