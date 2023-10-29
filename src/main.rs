@@ -1,10 +1,11 @@
 use std::{
-    fs,
-    io::{self, Write},
+    fs::{self, File},
+    io::{self, stdout, BufWriter, Write},
     path::PathBuf,
 };
 
 use clap::Parser;
+use ir::{IntValue, Script};
 use lexgen_util::{LexerErrorKind, Loc};
 use parser::ScriptError;
 use thiserror::Error;
@@ -26,11 +27,74 @@ enum Error {
 
     #[error("Lexer Error")]
     LexError(Loc),
+
+    #[error("CLI Error: {0}")]
+    CliError(&'static str),
 }
 
 #[derive(Parser)]
 struct Args {
+    /// Input file (script to compile)
     input: PathBuf,
+
+    /// Output file (default: stdout)
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Print resulting IR as comment in output
+    #[arg(long)]
+    debug_ir: bool,
+
+    /// Output as binary rather than C (limited to one script)
+    #[arg(long)]
+    binary: bool,
+}
+
+fn print_c_scripts<W: io::Write>(
+    w: &mut W,
+    scripts: Vec<(IntValue, String, Script)>,
+    pretty_bytecode: bool,
+) -> io::Result<()> {
+    use crate::bytecode::encode_script;
+
+    for (_, name, script) in scripts {
+        let bytecode = encode_script(&script);
+
+        // print bytecode as C
+
+        if pretty_bytecode {
+            // not so pretty (or bytecode) just yet, just debug IR
+            writeln!(w, "/*")?;
+
+            writeln!(w, "{:?}", script)?;
+
+            writeln!(w, "*/")?;
+        }
+
+        let bytes = bytecode.len();
+
+        writeln!(w, "// {name}: length of {bytes} bytes (+ padding)")?;
+        write!(w, "unsigned int const {name}[] = {{")?;
+
+        for i in 0..(bytecode.len() + 3) / 4 {
+            let val = u32::from_le_bytes([
+                bytecode[i * 4],
+                *bytecode.get(i * 4 + 1).unwrap_or(&0),
+                *bytecode.get(i * 4 + 2).unwrap_or(&0),
+                *bytecode.get(i * 4 + 3).unwrap_or(&0),
+            ]);
+
+            if i % 8 == 0 {
+                write!(w, "\n   ")?;
+            }
+
+            write!(w, " 0x{val:08X},")?;
+        }
+
+        writeln!(w, "\n}};")?;
+    }
+
+    Ok(())
 }
 
 fn main_error() -> Result<(), Error> {
@@ -64,33 +128,39 @@ fn main_error() -> Result<(), Error> {
 
     match p.end_of_input() {
         Ok((_, parse_ctx)) => {
-            for (_, name, script) in parse_ctx.scripts {
-                let bytecode = encode_script(&script);
+            if args.binary {
+                if parse_ctx.scripts.len() != 1 {
+                    Err(Error::CliError(
+                        "In binary output mode, only one script can be defined",
+                    ))
+                } else {
+                    let script = &parse_ctx.scripts[0].2;
+                    let bytecode = encode_script(script);
 
-                // print bytecode as C
+                    match args.output {
+                        Some(out_path) => {
+                            fs::write(out_path, bytecode)?;
+                        }
 
-                println!("// {name}: length of {0} bytes (+ padding)", bytecode.len());
-                print!("unsigned int const {name}[] = {{");
-
-                for i in 0..(bytecode.len() + 3) / 4 {
-                    let val = u32::from_le_bytes([
-                        bytecode[i * 4],
-                        *bytecode.get(i * 4 + 1).unwrap_or(&0),
-                        *bytecode.get(i * 4 + 2).unwrap_or(&0),
-                        *bytecode.get(i * 4 + 3).unwrap_or(&0),
-                    ]);
-
-                    if i % 8 == 0 {
-                        print!("\n   ");
+                        None => {
+                            stdout().write(&bytecode)?;
+                        }
                     }
 
-                    print!(" 0x{val:08X},");
+                    Ok(())
+                }
+            } else {
+                if let Some(path) = args.output {
+                    let output = File::create(path)?;
+                    let mut buf_write = BufWriter::new(output);
+                    print_c_scripts(&mut buf_write, parse_ctx.scripts, args.debug_ir)?;
+                    buf_write.flush()?;
+                } else {
+                    print_c_scripts(&mut stdout(), parse_ctx.scripts, args.debug_ir)?;
                 }
 
-                println!("\n}};");
+                Ok(())
             }
-
-            Ok(())
         }
 
         Err(err) => Err(err.into()),
@@ -112,3 +182,6 @@ fn main() -> Result<(), ()> {
         }
     }
 }
+
+// weird TODOs:
+// TODO: prevent default case at offset 0 (due to a bug in the interpreter, this won't work)

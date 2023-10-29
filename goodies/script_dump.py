@@ -1,5 +1,6 @@
 import sys
 
+TABLE_ADDR_FOMT = 0x080F89D4
 TABLE_ADDR_MFOMT = 0x081014BC
 
 def read_int(input, byte_count, signed = False):
@@ -149,8 +150,8 @@ def decode_code_chunk(code_data: bytes) -> dict[int, tuple[int, tuple[int, bool]
 
     return ins
 
-def dump_script(f, id):
-    f.seek(offof(TABLE_ADDR_MFOMT + id * 4))
+def dump_script(f, table_addr, id):
+    f.seek(offof(table_addr + id * 4))
     script_addr = read_int(f, 4)
 
     if script_addr == 0 and id == 0:
@@ -233,6 +234,18 @@ def dump_script(f, id):
 
     return True
 
+def find_script_table_addr(f):
+    f.seek(0xA0) # ROM name in header
+    game_title = f.read(12)
+
+    if game_title == b"HARVESTMOGBA":
+        return TABLE_ADDR_FOMT
+
+    elif game_title == b"HM MFOM USA\0":
+        return TABLE_ADDR_MFOMT
+
+    return 0
+
 def main(args: list[str]):
     try:
         rom_path = args[1]
@@ -242,13 +255,18 @@ def main(args: list[str]):
         return f"Usage: {args[0]} ROM"
 
     with open(rom_path, 'rb') as f:
+        table_addr = find_script_table_addr(f)
+
+        if table_addr == 0:
+            return f"Couldn't find script table (bad ROM?)"
+
         if dump_id != None:
-            if not dump_script(f, dump_id):
-                sys.stderr.write(f"Failed to dump script {dump_id}")
+            if not dump_script(f, table_addr, dump_id):
+                return f"Failed to dump script {dump_id}"
 
         else:
             for i in range(2000): # big numb
-                if not dump_script(f, i):
+                if not dump_script(f, table_addr, i):
                     break
 
 if __name__ == '__main__':

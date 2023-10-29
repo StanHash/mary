@@ -10,9 +10,20 @@ If you are looking for my old attempt at writing this in C++, see [StanHash/mary
 
 ## Usage
 
-    mary INPUT > OUTPUT
+    mary INPUT -o OUTPUT
 
 The input is a file written in a custom script syntax. The output is a fragment of C that defines the data objects for the scripts defined in the source file.
+
+Other options:
+
+    # output to stdout
+    mary INPUT
+
+    # output to binary file instead of C (only one script can be defined)
+    mary INPUT -o OUTPUT --binary
+
+    # output with a textual representation of the generated intermediate representation (for debugging codegen)
+    mary INPUT --debug-ir
 
 ## Build
 
@@ -25,14 +36,15 @@ You will find the mary executable into the target/release directory.
 ## Example script
 
     // Script 1 of MFoMT
+    // (same as FoMT except for slightly offset native callable ids)
 
     func 0x106 Func106()
     func 0x117 Func117(a)
-    proc 0x105 Func105(a, b, c)
-    proc 0x01F Func01F()
-    proc 0x022 Func022(a)
-    proc 0x021 Func021()
-    proc 0x011 Func011(a, b, c)
+    proc 0x105 Proc105(a, b, c)
+    proc 0x01F Proc01F()
+    proc 0x022 Proc022(a)
+    proc 0x021 Proc021()
+    proc 0x011 Proc011(a, b, c)
 
     const CONST_36 = 0x36
     const MESSAGE = "\xFF%is \r\nprengant!\x05"
@@ -44,17 +56,17 @@ You will find the mary executable into the target/release directory.
 
         if Func117(var_0)
         {
-            Func105(0, 1, var_0)
+            Proc105(0, 1, var_0)
         }
         else
         {
-            Func105(0, 2, var_0)
+            Proc105(0, 2, var_0)
         }
 
-        Func01F()
-        Func022(MESSAGE)
-        Func021()
-        Func011(var_1, 1, 0)
+        Proc01F()
+        Proc022(MESSAGE)
+        Proc021()
+        Proc011(var_1, 1, 0)
     }
 
 ## Script constructs
