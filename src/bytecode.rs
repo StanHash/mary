@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, iter::repeat};
+use std::{collections::BTreeMap, io, iter::repeat};
 
 use crate::ir::{CaseEnum, Ins, IntValue, Script, StrValue};
 
@@ -359,6 +359,45 @@ pub fn encode_script(script: &Script) -> Vec<u8> {
     SlicePatch(&mut vec[4..]).push_u32(len as u32);
 
     vec
+}
+
+// for decoder (not yet implemented) and also tests
+trait DecodeHelper {
+    fn read_u32(&mut self) -> io::Result<u32>;
+    fn read_u16(&mut self) -> io::Result<u16>;
+    fn read_u8(&mut self) -> io::Result<u8>;
+    fn read_4byte(&mut self) -> io::Result<[u8; 4]>;
+}
+
+impl<R: io::Read> DecodeHelper for R {
+    fn read_u32(&mut self) -> io::Result<u32> {
+        let mut buf = [0u8; 4];
+        self.read_exact(&mut buf)?;
+
+        Ok((buf[0] as u32)
+            | ((buf[1] as u32) << 8)
+            | ((buf[2] as u32) << 16)
+            | ((buf[3] as u32) << 24))
+    }
+
+    fn read_u16(&mut self) -> io::Result<u16> {
+        let mut buf = [0u8; 2];
+        self.read_exact(&mut buf)?;
+
+        Ok((buf[0] as u16) | ((buf[1] as u16) << 8))
+    }
+
+    fn read_u8(&mut self) -> io::Result<u8> {
+        let mut buf = [0u8; 1];
+        self.read_exact(&mut buf)?;
+        Ok(buf[0])
+    }
+
+    fn read_4byte(&mut self) -> io::Result<[u8; 4]> {
+        let mut buf = [0u8; 4];
+        self.read_exact(&mut buf)?;
+        Ok(buf)
+    }
 }
 
 #[cfg(test)]
