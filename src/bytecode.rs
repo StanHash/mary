@@ -202,11 +202,11 @@ fn encode_code(vec: &mut Vec<u8>, ins_seq: &[Ins]) -> JumpTables {
                     switches.len() - 1
                 });
 
-                switches[id].push((*en, vec.len()));
+                switches[id].push((*en, vec.len() - begin));
             }
 
             Ins::Label(jid) => {
-                label_map.insert(*jid, vec.len());
+                label_map.insert(*jid, vec.len() - begin);
             }
         }
     }
@@ -340,9 +340,10 @@ pub fn encode_script(script: &Script) -> Vec<u8> {
         SlicePatch(&mut vec[chunk_hook + 4..]).push_u32(chunk_len as u32);
     }
 
-    // last chunk is STR, if present
+    // last chunk is STR
+    // unlike JUMP, STR is always present in vanilla scripts
 
-    if script.str_tab.len() != 0 {
+    {
         let chunk_hook = vec.len();
         vec.extend(b"STR ");
         vec.push_u32(0);
@@ -358,4 +359,106 @@ pub fn encode_script(script: &Script) -> Vec<u8> {
     SlicePatch(&mut vec[4..]).push_u32(len as u32);
 
     vec
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn encode_code_helper(ins_seq: &[Ins]) -> Vec<u8> {
+        let mut vec = vec![];
+        encode_code(&mut vec, ins_seq);
+        vec
+    }
+
+    fn check_code_integrity(code: &[u8]) -> bool {
+        code.len() >= 8 && {
+            let head = (&mut &code[0..4]).read_u32().unwrap();
+            let code = &code[4..];
+
+            head == (code.len()) as u32 && {
+                let mut last = code.len() - 1;
+
+                while code[last] == OPCODE_NOP {
+                    last = last - 1;
+                }
+
+                code[last] == OPCODE_END
+            }
+        }
+    }
+
+    #[test]
+    fn test_write_push() {
+        let helper = |val| {
+            let mut v = vec![];
+            write_push(&mut v, val);
+            v
+        };
+
+        assert_eq!(&helper(0), &[OPCODE_PUSH8, 0]);
+        assert_eq!(&helper(256), &[OPCODE_PUSH16, 0, 1]);
+        assert_eq!(&helper(65536), &[OPCODE_PUSH32, 0, 0, 1, 0]);
+
+        // weird cases. vanilla uses signed int maxs as thresholds instead of unsigned variants
+        assert_eq!(&helper(127), &[OPCODE_PUSH8, 127]);
+        assert_eq!(&helper(128), &[OPCODE_PUSH16, 128, 0]);
+        assert_eq!(&helper(32767), &[OPCODE_PUSH16, 255, 127]);
+        assert_eq!(&helper(32768), &[OPCODE_PUSH32, 0, 128, 0, 0]);
+    }
+
+    #[test]
+    fn test_encode_label() {
+        use crate::ir::{CallId, JumpId};
+
+        let ins_seq = vec![
+            Ins::Call(CallId(0)),  // 0, for padding
+            Ins::Label(JumpId(0)), // 5
+            Ins::Call(CallId(1)),  // 5, for padding
+            Ins::Beq(JumpId(0)),   // 10
+        ];
+
+        let data = encode_code_helper(&ins_seq);
+
+        assert!(check_code_integrity(&data));
+
+        let data = &data[4..]; // skip head size bytes
+
+        assert_eq!(&data[10..15], &[OPCODE_BEQ, 5, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_encode_headers() {
+        let empty_script = Script {
+            ins_seq: vec![],
+            str_tab: vec![],
+        };
+
+        let data = encode_script(&empty_script);
+
+        // RIFF head
+        assert_eq!(&data[0..4], b"RIFF");
+        assert_eq!((&mut &data[4..8]).read_u32().unwrap(), data.len() as u32);
+        assert_eq!(&data[8..12], b"SCR ");
+
+        // CODE head
+        assert_eq!(&data[12..16], b"CODE");
+        assert_eq!((&mut &data[16..20]).read_u32().unwrap(), 8);
+
+        // CODE body
+        assert_eq!((&mut &data[20..24]).read_u32().unwrap(), 4);
+        assert_eq!(
+            &data[24..28],
+            &[OPCODE_END, OPCODE_NOP, OPCODE_NOP, OPCODE_NOP]
+        );
+
+        assert!(check_code_integrity(&data[20..28]));
+
+        // STR head
+        assert_eq!(&data[28..32], b"STR ");
+        assert_eq!((&mut &data[32..36]).read_u32().unwrap(), 4);
+
+        // STR body
+        assert_eq!((&mut &data[36..40]).read_u32().unwrap(), 0);
+    }
 }
