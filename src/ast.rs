@@ -71,6 +71,7 @@ pub enum SwitchCase {
 
 // TODO: do we need ConstVal? can't we have ConstRef?
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum ConstVal {
     Int(IntValue),
     Str(StrValue),
@@ -176,6 +177,43 @@ impl ConstVal {
             Expr::CmpGe(_) => todo!(),         // TODO
             Expr::CmpGt(_) => todo!(),         // TODO
             Expr::Call(_) => todo!(),          // TODO: error
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_int_const_eval() {
+        let int_pairs = [(5, 3), (0, 1), (6, 7)];
+
+        for (a, b) in int_pairs {
+            assert_eq!(
+                ConstVal::add(Some(ConstVal::Int(a)), Some(ConstVal::Int(b))),
+                Some(ConstVal::Int(a + b))
+            );
+
+            assert_eq!(
+                ConstVal::sub(Some(ConstVal::Int(a)), Some(ConstVal::Int(b))),
+                Some(ConstVal::Int(a - b))
+            );
+
+            assert_eq!(
+                ConstVal::mul(Some(ConstVal::Int(a)), Some(ConstVal::Int(b))),
+                Some(ConstVal::Int(a * b))
+            );
+
+            assert_eq!(
+                ConstVal::div(Some(ConstVal::Int(a)), Some(ConstVal::Int(b))),
+                Some(ConstVal::Int(a / b))
+            );
+
+            assert_eq!(
+                ConstVal::rem(Some(ConstVal::Int(a)), Some(ConstVal::Int(b))),
+                Some(ConstVal::Int(a % b))
+            );
         }
     }
 }
