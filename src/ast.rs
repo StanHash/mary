@@ -1,6 +1,8 @@
-use crate::ir::{IntValue, StrValue};
+use std::fmt;
 
-#[derive(Debug)]
+use crate::ir::{CallId, IntValue, StrValue, SwitchId, VarId};
+
+#[derive(Debug, PartialEq)]
 pub struct Invoke {
     pub func: String,
     pub args: Vec<Expr>,
@@ -12,7 +14,7 @@ impl Invoke {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Expr {
     Name(String),
     Int(IntValue),
@@ -39,7 +41,7 @@ pub enum Expr {
     Call(Invoke),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AssignOperation {
     None,
     Add,
@@ -49,7 +51,20 @@ pub enum AssignOperation {
     Mod,
 }
 
-#[derive(Debug)]
+impl fmt::Display for AssignOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AssignOperation::None => write!(f, "="),
+            AssignOperation::Add => write!(f, "+="),
+            AssignOperation::Sub => write!(f, "-="),
+            AssignOperation::Mul => write!(f, "*="),
+            AssignOperation::Div => write!(f, "/="),
+            AssignOperation::Mod => write!(f, "%="),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Stmt {
     Vars(Vec<(String, Option<Expr>)>),
     Consts(Vec<(String, Expr)>),
@@ -60,13 +75,30 @@ pub enum Stmt {
     IfElse(Expr, Vec<Stmt>, Vec<Stmt>),
     For(Box<(Expr, Stmt, Stmt, Vec<Stmt>)>),
     DoWhile(Expr, Vec<Stmt>),
-    Switch(Expr, Vec<SwitchCase>),
+    Switch(Expr, Vec<SwitchCase>, SwitchId),
+    Exit,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum SwitchCase {
-    Case(Expr, Vec<Stmt>),
+    Case(Vec<Expr>, Vec<Stmt>),
     Default(Vec<Stmt>),
+}
+
+impl SwitchCase {
+    pub fn stmts(&self) -> &[Stmt] {
+        match self {
+            SwitchCase::Case(_, stmts) => stmts,
+            SwitchCase::Default(stmts) => stmts,
+        }
+    }
+
+    pub fn stmts_mut(&mut self) -> &mut [Stmt] {
+        match self {
+            SwitchCase::Case(_, stmts) => stmts,
+            SwitchCase::Default(stmts) => stmts,
+        }
+    }
 }
 
 // TODO: do we need ConstVal? can't we have ConstRef?
@@ -82,8 +114,29 @@ pub enum ConstRef<'a> {
     Str(&'a StrValue),
 }
 
+pub enum NameRef<'a> {
+    Const(&'a ConstVal),
+    Func(CallId),
+    Proc(CallId),
+    Var(VarId),
+}
+
 pub trait ConstAccess {
     fn lookup_const(&self, name: &str) -> Option<ConstRef>;
+}
+
+pub trait NameAccess {
+    fn lookup_name(&self, name: &str) -> Option<NameRef>;
+}
+
+impl<N: NameAccess> ConstAccess for N {
+    fn lookup_const(&self, name: &str) -> Option<ConstRef> {
+        match self.lookup_name(name) {
+            Some(NameRef::Const(ConstVal::Int(i))) => Some(ConstRef::Int(*i)),
+            Some(NameRef::Const(ConstVal::Str(s))) => Some(ConstRef::Str(s)),
+            _ => None,
+        }
+    }
 }
 
 impl ConstVal {

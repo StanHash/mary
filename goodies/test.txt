@@ -1,29 +1,33 @@
 // Script 1 of MFoMT
 // (same as FoMT except for slightly offset native callable ids)
 
+// see goodies/lib_[m]fomt.txt for a full list of known callable shapes
 func 0x106 Func106()
-func 0x117 Func117(a)
-proc 0x105 Proc105(a, b, c)
+func 0x117 Func117(idx)
+proc 0x105 Proc105(string_slot, animal_kind, idx)
 proc 0x01F Proc01F()
-proc 0x022 Proc022(a)
+proc 0x022 Proc022(message : string)
 proc 0x021 Proc021()
-proc 0x011 Proc011(a, b, c)
+proc 0x011 Proc011(arg_0, arg_1, arg_1)
 
 const CONST_36 = 0x36
-const MESSAGE = "\xFF%is \r\nprengant!\x05"
 
 script 1 EventScript_1
 {
-    var var_0 = Func106()
-    var var_1 = CONST_36 + var_0
+    const MESSAGE = "\xFF%is \r\nprengant!\x05"
 
-    if Func117(var_0)
+    var animal_id = Func106()
+    var var_1 = CONST_36 + animal_id
+
+    if Func117(animal_id)
     {
-        Proc105(0, 1, var_0)
+        // cow
+        Proc105(0, 1, animal_id)
     }
     else
     {
-        Proc105(0, 2, var_0)
+        // sheep
+        Proc105(0, 2, animal_id)
     }
 
     Proc01F()

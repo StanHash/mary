@@ -1,44 +1,7 @@
-use std::{collections::BTreeMap, io, iter::repeat};
+use std::{collections::BTreeMap, iter::repeat};
 
+use super::opcodes::*;
 use crate::ir::{CaseEnum, Ins, IntValue, Script, StrValue};
-
-const OPCODE_NOP: u8 = 0x00;
-const OPCODE_EQU: u8 = 0x01;
-const OPCODE_ADDEQU: u8 = 0x02;
-const OPCODE_SUBEQU: u8 = 0x03;
-const OPCODE_MULEQU: u8 = 0x04;
-const OPCODE_DIVEQU: u8 = 0x05;
-const OPCODE_MODEQU: u8 = 0x06;
-const OPCODE_ADD: u8 = 0x07;
-const OPCODE_SUB: u8 = 0x08;
-const OPCODE_MUL: u8 = 0x09;
-const OPCODE_DIV: u8 = 0x0A;
-const OPCODE_MOD: u8 = 0x0B;
-const OPCODE_AND: u8 = 0x0C;
-const OPCODE_OR: u8 = 0x0D;
-const OPCODE_INC: u8 = 0x0E;
-const OPCODE_DEC: u8 = 0x0F;
-const OPCODE_NEG: u8 = 0x10;
-const OPCODE_NOT: u8 = 0x11;
-const OPCODE_CMP: u8 = 0x12;
-const OPCODE_PUSHV: u8 = 0x13;
-const OPCODE_POPV: u8 = 0x14;
-const OPCODE_DUP: u8 = 0x15;
-const OPCODE_DISC: u8 = 0x16;
-const OPCODE_PUSH32: u8 = 0x17;
-const OPCODE_JMP: u8 = 0x18;
-const OPCODE_BLT: u8 = 0x19;
-const OPCODE_BLE: u8 = 0x1A;
-const OPCODE_BEQ: u8 = 0x1B;
-const OPCODE_BNE: u8 = 0x1C;
-const OPCODE_BGE: u8 = 0x1D;
-const OPCODE_BGT: u8 = 0x1E;
-// const OPCODE_JPI: u8 = 0x1F;
-const OPCODE_END: u8 = 0x20;
-const OPCODE_CALL: u8 = 0x21;
-const OPCODE_PUSH16: u8 = 0x22;
-const OPCODE_PUSH8: u8 = 0x23;
-const OPCODE_SWITCH: u8 = 0x24;
 
 trait EncoderHelper {
     fn push_u8(&mut self, val: u8);
@@ -75,8 +38,11 @@ impl<'a> EncoderHelper for SlicePatch<'a> {
 fn write_push(vec: &mut Vec<u8>, val: IntValue) {
     let val = val & 0xFFFFFFFF;
 
-    // NOTE: those constants are a bit off
-    // they could be 0x100 and 0x10000
+    /*
+     * In order to produce matching scripts, those constants need to be a bit off.
+     * They could be 0x100 and 0x10000, but are half of those instead.
+     * Presumably, in the original script compiler, they used INT8_MAX and INT16_MAX constants.
+     */
 
     if val < 0x80 {
         vec.push(OPCODE_PUSH8);
@@ -92,18 +58,36 @@ fn write_push(vec: &mut Vec<u8>, val: IntValue) {
 
 struct JumpTables(Vec<Vec<(CaseEnum, usize)>>);
 
-fn encode_code(vec: &mut Vec<u8>, ins_seq: &[Ins]) -> JumpTables {
+fn encode_instructions(vec: &mut Vec<u8>, instructions: &[Ins]) -> JumpTables {
     let mut label_map = BTreeMap::new();
     let mut jump_map = BTreeMap::new();
-    let mut switch_map = BTreeMap::new();
     let mut switches = Vec::new();
+
+    /* pre-populate switches (important for order) */
+
+    switches.resize_with(
+        {
+            let mut switch_id_max = 0;
+
+            for ins in instructions {
+                if let Ins::Switch(switch_id) = ins {
+                    switch_id_max = switch_id_max.max(switch_id.0 + 1);
+                }
+            }
+
+            switch_id_max
+        },
+        Vec::default,
+    );
+
+    // TODO: this should raise (internal) errors when jumps can't be generated
 
     // placeholder for code size
     vec.push_u32(0);
 
     let begin = vec.len();
 
-    for ins in ins_seq {
+    for ins in instructions {
         match ins {
             Ins::Assign => vec.push(OPCODE_EQU),
             Ins::AssignAdd => vec.push(OPCODE_ADDEQU),
@@ -187,22 +171,16 @@ fn encode_code(vec: &mut Vec<u8>, ins_seq: &[Ins]) -> JumpTables {
             }
 
             Ins::Switch(id) => {
-                let id = switch_map.entry(*id).or_insert_with(|| {
-                    switches.push(Vec::new());
-                    switches.len() - 1
-                });
-
                 vec.push(OPCODE_SWITCH);
-                vec.push_u32(*id as u32);
+                vec.push_u32(id.0 as u32);
+            }
+
+            Ins::Exit => {
+                vec.push(OPCODE_END);
             }
 
             Ins::Case(id, en) => {
-                let id = *switch_map.entry(*id).or_insert_with(|| {
-                    switches.push(Vec::new());
-                    switches.len() - 1
-                });
-
-                switches[id].push((*en, vec.len() - begin));
+                switches[id.0].push((*en, vec.len() - begin));
             }
 
             Ins::Label(jid) => {
@@ -235,14 +213,15 @@ fn encode_jump(vec: &mut Vec<u8>, jump_tables: JumpTables) {
 
     vec.push_u32(jump_tables.len() as u32);
 
+    let data_begin = vec.len();
+
+    /* make room for table offsets */
     let table_begin = vec.len();
     vec.extend(repeat(0).take(4 * jump_tables.len()));
 
-    let data_begin = vec.len();
-
     for (i, jt) in jump_tables.iter().enumerate() {
         let off = vec.len() - data_begin;
-        SlicePatch(&mut vec[table_begin + 4 * i..]).push_u32((off / 4) as u32);
+        SlicePatch(&mut vec[table_begin + 4 * i..]).push_u32(off as u32);
 
         // handle default offset
 
@@ -322,7 +301,7 @@ pub fn encode_script(script: &Script) -> Vec<u8> {
     vec.extend(b"CODE");
     vec.push_u32(0);
 
-    let jump_tables = encode_code(&mut vec, &script.ins_seq);
+    let jump_tables = encode_instructions(&mut vec, &script.instructions);
 
     let chunk_len = vec.len() - chunk_hook - 8;
     SlicePatch(&mut vec[chunk_hook + 4..]).push_u32(chunk_len as u32);
@@ -348,7 +327,7 @@ pub fn encode_script(script: &Script) -> Vec<u8> {
         vec.extend(b"STR ");
         vec.push_u32(0);
 
-        encode_str(&mut vec, &script.str_tab);
+        encode_str(&mut vec, &script.strings);
 
         let chunk_len = vec.len() - chunk_hook - 8;
         SlicePatch(&mut vec[chunk_hook + 4..]).push_u32(chunk_len as u32);
@@ -361,52 +340,14 @@ pub fn encode_script(script: &Script) -> Vec<u8> {
     vec
 }
 
-// for decoder (not yet implemented) and also tests
-trait DecodeHelper {
-    fn read_u32(&mut self) -> io::Result<u32>;
-    fn read_u16(&mut self) -> io::Result<u16>;
-    fn read_u8(&mut self) -> io::Result<u8>;
-    fn read_4byte(&mut self) -> io::Result<[u8; 4]>;
-}
-
-impl<R: io::Read> DecodeHelper for R {
-    fn read_u32(&mut self) -> io::Result<u32> {
-        let mut buf = [0u8; 4];
-        self.read_exact(&mut buf)?;
-
-        Ok((buf[0] as u32)
-            | ((buf[1] as u32) << 8)
-            | ((buf[2] as u32) << 16)
-            | ((buf[3] as u32) << 24))
-    }
-
-    fn read_u16(&mut self) -> io::Result<u16> {
-        let mut buf = [0u8; 2];
-        self.read_exact(&mut buf)?;
-
-        Ok((buf[0] as u16) | ((buf[1] as u16) << 8))
-    }
-
-    fn read_u8(&mut self) -> io::Result<u8> {
-        let mut buf = [0u8; 1];
-        self.read_exact(&mut buf)?;
-        Ok(buf[0])
-    }
-
-    fn read_4byte(&mut self) -> io::Result<[u8; 4]> {
-        let mut buf = [0u8; 4];
-        self.read_exact(&mut buf)?;
-        Ok(buf)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::decoder::DecodeHelper;
     use super::*;
 
-    fn encode_code_helper(ins_seq: &[Ins]) -> Vec<u8> {
+    fn encode_code_helper(instructions: &[Ins]) -> Vec<u8> {
         let mut vec = vec![];
-        encode_code(&mut vec, ins_seq);
+        encode_instructions(&mut vec, instructions);
         vec
     }
 
@@ -469,8 +410,8 @@ mod tests {
     #[test]
     fn test_encode_headers() {
         let empty_script = Script {
-            ins_seq: vec![],
-            str_tab: vec![],
+            instructions: vec![],
+            strings: vec![],
         };
 
         let data = encode_script(&empty_script);

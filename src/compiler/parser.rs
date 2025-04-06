@@ -1,10 +1,9 @@
 use pomelo::pomelo;
-use thiserror::Error;
 
+use super::{compile_script, ScriptError};
 use crate::ast::{AssignOperation, ConstVal, Expr, Invoke, Stmt, SwitchCase};
-use crate::compiler::compile_script;
-use crate::compiler::{CompileErrors, ConstScope};
-use crate::ir::{CallId, IntValue, Script};
+use crate::const_scope::ConstScope;
+use crate::ir::{CallId, IntValue, Script, SwitchId, ValueType};
 
 pub struct ParseContext {
     pub allow_scripts: bool,
@@ -22,33 +21,6 @@ impl ParseContext {
             const_scope: ConstScope::new(),
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum ScriptError {
-    #[error("Compile errors while compiling {0}: {1}")]
-    CompileErrors(String, CompileErrors),
-
-    #[error("Syntax error")]
-    SyntaxError,
-
-    #[error("Fatal syntax error")]
-    ParseFail,
-
-    #[error("Fatal parse error: stack overflow")]
-    ParseStackOverflow,
-
-    #[error("Failed to evaluate constant expression")]
-    FailedConstantEvaluation,
-
-    #[error("Toplevel declarations must be before script blocks")]
-    DeclarationsAfterScript,
-
-    #[error("Included files cannot define script blocks")]
-    ScriptInIncludedFiles,
-
-    #[error("{0} ids cannot be strings")]
-    StringId(&'static str),
 }
 
 pomelo! {
@@ -93,10 +65,10 @@ pomelo! {
         }
     };
 
-    function_declaration ::= KwFunc primary_expr(e) Name(n) paren_params {
+    function_declaration ::= KwFunc primary_expr(e) Name(n) paren_params(p) {
         if extra.allow_declarations {
             match ConstVal::eval_expr(&e, &extra.const_scope) {
-                Some(ConstVal::Int(integer)) => extra.const_scope.add_func(n, CallId(integer as usize)),
+                Some(ConstVal::Int(integer)) => extra.const_scope.add_func(n, CallId(integer as usize), p),
                 Some(ConstVal::Str(_)) => return Err(ScriptError::StringId("Function")),
                 None => return Err(ScriptError::FailedConstantEvaluation),
             }
@@ -105,10 +77,10 @@ pomelo! {
         }
     };
 
-    function_declaration ::= KwProc primary_expr(e) Name(n) paren_params {
+    function_declaration ::= KwProc primary_expr(e) Name(n) paren_params(p) {
         if extra.allow_declarations {
             match ConstVal::eval_expr(&e, &extra.const_scope) {
-                Some(ConstVal::Int(integer)) => extra.const_scope.add_proc(n, CallId(integer as usize)),
+                Some(ConstVal::Int(integer)) => extra.const_scope.add_proc(n, CallId(integer as usize), p),
                 Some(ConstVal::Str(_)) => return Err(ScriptError::StringId("Procedure")),
                 None => return Err(ScriptError::FailedConstantEvaluation),
             }
@@ -117,13 +89,22 @@ pomelo! {
         }
     };
 
-    paren_params ::= LParen RParen;
+    %type paren_params Vec<ValueType>; /* types of parameters */
+    paren_params ::= LParen RParen { vec![] };
     paren_params ::= LParen params RParen;
 
-    params ::= param;
-    params ::= params Comma param;
+    %type params Vec<ValueType>; /* types of parameters */
+    params ::= param(p) { vec![p] };
+    params ::= params(mut v) Comma param(p) { v.push(p); v };
 
-    param ::= Name;
+    %type param ValueType;
+    param ::= Name { ValueType::Undefined };
+    param ::= Name Colon type_name(tn) { tn };
+
+    %type type_name ValueType;
+    type_name ::= KwString { ValueType::String };
+    type_name ::= KwInteger { ValueType::Integer };
+    type_name ::= Name(n) { ValueType::UserType(extra.const_scope.add_or_get_user_type(n)) }
 
     script_declaration ::= KwScript expr(e) Name(n) stmt_block(b) {
         if extra.allow_scripts {
@@ -166,10 +147,11 @@ pomelo! {
     stmt ::= assignment(a) { Stmt::Assign(a.0, a.1, a.2) };
     stmt ::= call(i) { Stmt::Call(i) }
     stmt ::= KwIf expr(e) stmt_block(b) { Stmt::If(e, b) };
-    stmt ::= KwIf expr(e) stmt_block(b1) KwElse stmt_block(b2) { Stmt::IfElse(e, b1, b2) };
-    stmt ::= KwDo stmt_block(b) KwWhile expr(e) { Stmt::DoWhile(e,b) };
+    stmt ::= KwIf expr(e) stmt_block(b1) else_if_chain(b2) { Stmt::IfElse(e, b1, b2) };
+    stmt ::= KwDo stmt_block(b) KwWhile expr(e) { Stmt::DoWhile(e, b) };
     stmt ::= KwFor stmt(h) Semicolon expr(e) Semicolon stmt(t) stmt_block(b) { Stmt::For(Box::new((e, h, t, b))) };
-    stmt ::= KwSwitch expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c) };
+    stmt ::= KwSwitch expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c, SwitchId(0)) };
+    stmt ::= KwExit { Stmt::Exit };
     stmt ::= preincr(e) { Stmt::Expr(e) };
     stmt ::= postincr(e) { Stmt::Expr(e) };
 
@@ -188,12 +170,17 @@ pomelo! {
     %type const_initializer (String, Expr);
     const_initializer ::= Name(n) Equal expr(e) { (n, e) };
 
+    %type else_if_chain Vec<Stmt>;
+    else_if_chain ::= KwElse stmt_block(b) { b };
+    else_if_chain ::= KwElse KwIf expr(e) stmt_block(b) { vec![Stmt::If(e, b)] }
+    else_if_chain ::= KwElse KwIf expr(e) stmt_block(b) else_if_chain(c) { vec![Stmt::IfElse(e, b, c)] }
+
     %type cases Vec<SwitchCase>;
     cases ::= cases(mut v) case(c) { v.push(c); v };
     cases ::= case(c) { vec![c] };
 
     %type case SwitchCase;
-    case ::= KwCase expr(e) stmt_block(b) { SwitchCase::Case(e, b) };
+    case ::= KwCase args(a) stmt_block(b) { SwitchCase::Case(a, b) };
     case ::= KwDefault stmt_block(b) { SwitchCase::Default(b) };
 
     /* =============== */
@@ -258,11 +245,11 @@ pomelo! {
     unary_expr ::= Minus unary_expr(e) { Expr::OpNeg(Box::new(e)) };
     unary_expr ::= Plus unary_expr;
     unary_expr ::= Negate unary_expr(e) { Expr::OpNot(Box::new(e)) };
-    unary_expr ::= postfix_expr;
+    unary_expr ::= call_expr;
 
-    %type postfix_expr Expr;
-    postfix_expr ::= call(i) { Expr::Call(i) };
-    postfix_expr ::= primary_expr;
+    %type call_expr Expr;
+    call_expr ::= call(i) { Expr::Call(i) };
+    call_expr ::= primary_expr;
 
     %type primary_expr Expr;
     primary_expr ::= Name(n) { Expr::Name(n) };
@@ -282,3 +269,23 @@ pomelo! {
 }
 
 pub use parser::*;
+
+#[cfg(test)]
+mod tests {
+    use crate::compiler::{parse_string, ScriptError};
+
+    #[test]
+    fn test_parse_else_chain() -> Result<(), ScriptError> {
+        let inputs = [
+            "script 0 TEST { if 0 { } else { } }",
+            "script 0 TEST { if 0 { } else if 0 { } else if 0 { } }",
+            "script 0 TEST { if 0 { } else if 0 { } else if 0 { } else { } }",
+        ];
+
+        for input in inputs {
+            parse_string(input)?;
+        }
+
+        Ok(())
+    }
+}

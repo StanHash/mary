@@ -3,8 +3,10 @@ import sys
 TABLE_ADDR_FOMT = 0x080F89D4
 TABLE_ADDR_MFOMT = 0x081014BC
 
-def read_int(input, byte_count, signed = False):
-    return int.from_bytes(input.read(byte_count), byteorder = 'little', signed = signed)
+
+def read_int(input, byte_count, signed=False):
+    return int.from_bytes(input.read(byte_count), byteorder="little", signed=signed)
+
 
 OPCODE_NAME_TABLE = {
     0x00: "nop",
@@ -43,35 +45,41 @@ OPCODE_NAME_TABLE = {
     0x21: "call",
     0x22: "push16",
     0x23: "push8",
-    0x24: "switch"}
+    0x24: "switch",
+}
 
 CONDITIONAL_BRANCHES = (0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E)
 BRANCHES = (0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E)
 
 OPCODE_OPERAND_SIZE_TABLE = {
-    0x13: 4, # push [A]
-    0x14: 4, # pop [A]
-    0x17: 4, # push imm32
-    0x22: 2, # push imm16
-    0x23: 1, # push imm8
-    0x18: 4, # b label
-    0x19: 4, # blt label
-    0x1A: 4, # ble label
-    0x1B: 4, # beq label
-    0x1C: 4, # bne label
-    0x1D: 4, # bge label
-    0x1E: 4, # bgt label
-    0x21: 4, # call id
-    0x24: 4} # switch id
+    0x13: 4,  # push [A]
+    0x14: 4,  # pop [A]
+    0x17: 4,  # push imm32
+    0x22: 2,  # push imm16
+    0x23: 1,  # push imm8
+    0x18: 4,  # b label
+    0x19: 4,  # blt label
+    0x1A: 4,  # ble label
+    0x1B: 4,  # beq label
+    0x1C: 4,  # bne label
+    0x1D: 4,  # bge label
+    0x1E: 4,  # bgt label
+    0x21: 4,  # call id
+    0x24: 4,  # switch id
+}
+
 
 def offof(addr: int) -> int:
     return addr & 0x01FFFFFF
 
+
 def u32(b: bytes) -> int:
-    return int.from_bytes(b[0:4], byteorder = 'little', signed = False)
+    return int.from_bytes(b[0:4], byteorder="little", signed=False)
+
 
 def i32(b: bytes) -> int:
-    return int.from_bytes(b[0:4], byteorder = 'little', signed = True)
+    return int.from_bytes(b[0:4], byteorder="little", signed=True)
+
 
 def decode_jump_chunk(jump_data: bytes) -> list[tuple[int, dict[int, int]]]:
     i32s = [i32(jump_data[i:]) for i in range(0, len(jump_data), 4)]
@@ -80,10 +88,10 @@ def decode_jump_chunk(jump_data: bytes) -> list[tuple[int, dict[int, int]]]:
     count = i32s[0]
 
     # next are the offsets for each entry
-    offs = [(i // 4) - count for i in i32s[1:count + 1]]
+    offs = [(i // 4) - count for i in i32s[1 : count + 1]]
 
     # the data starts with the offsets
-    data = i32s[count + 1:]
+    data = i32s[count + 1 :]
 
     jump_tables = []
 
@@ -104,6 +112,7 @@ def decode_jump_chunk(jump_data: bytes) -> list[tuple[int, dict[int, int]]]:
 
     return jump_tables
 
+
 def read_str(data: bytes) -> bytes:
     end_off = 0
 
@@ -112,19 +121,23 @@ def read_str(data: bytes) -> bytes:
 
     return data[0:end_off]
 
+
 def decode_str_chunk(str_data: bytes) -> list[bytes]:
     count = i32(str_data[0:])
-    pool = str_data[4 + count * 4:]
+    pool = str_data[4 + count * 4 :]
 
     string_table = []
 
     for i in range(count):
-        off = i32(str_data[4 + i * 4:8 + i * 4])
+        off = i32(str_data[4 + i * 4 : 8 + i * 4])
         string_table.append(read_str(pool[off:]))
 
     return string_table
 
-def decode_code_chunk(code_data: bytes) -> dict[int, tuple[int, tuple[int, bool] | None]]:
+
+def decode_code_chunk(
+    code_data: bytes,
+) -> dict[int, tuple[int, tuple[int, bool] | None]]:
     pc = 0
 
     ins = {}
@@ -143,12 +156,20 @@ def decode_code_chunk(code_data: bytes) -> dict[int, tuple[int, tuple[int, bool]
 
         if opcode in OPCODE_OPERAND_SIZE_TABLE:
             operand_size = OPCODE_OPERAND_SIZE_TABLE[opcode]
-            operand = (int.from_bytes(code[pc + 1:pc + 1 + operand_size], byteorder = 'little', signed = True), offset_addressed)
+            operand = (
+                int.from_bytes(
+                    code[pc + 1 : pc + 1 + operand_size],
+                    byteorder="little",
+                    signed=True,
+                ),
+                offset_addressed,
+            )
 
         ins[pc] = (opcode, operand)
         pc = pc + 1 + operand_size
 
     return ins
+
 
 def dump_script(f, table_addr, id):
     f.seek(offof(table_addr + id * 4))
@@ -194,14 +215,14 @@ def dump_script(f, table_addr, id):
 
     print(f"# String table: {str_table}")
     print(f"# Jump table: {jump_table}")
-    print(f"# Instructions: {code_table}")
+    # print(f"# Instructions: {code_table}")
 
     labels = {}
 
     for pc in code_table:
         opcode, operand = code_table[pc]
 
-        if opcode in BRANCHES and operand != None:
+        if opcode in BRANCHES and operand is not None:
             if operand[0] < pc:
                 labels[operand[0]] = f"loop_{operand[0]}"
 
@@ -216,26 +237,36 @@ def dump_script(f, table_addr, id):
             target = jump_ent[1][case]
             labels[target] = f"case_{i}_{case}_{target}"
 
+    had_end = False
+
     for pc in code_table:
         opcode, operand = code_table[pc]
 
         if pc in labels:
             print(f"{labels[pc]}:")
 
-        name = OPCODE_NAME_TABLE[opcode] if opcode in OPCODE_NAME_TABLE else f"err_{opcode:02X}"
+        name = (
+            OPCODE_NAME_TABLE[opcode]
+            if opcode in OPCODE_NAME_TABLE
+            else f"err_{opcode:02X}"
+        )
 
-        if operand != None:
+        warn = " (!)" if had_end and name != "nop" else ""
+        had_end = had_end or name == "end"
+
+        if operand is not None:
             if opcode in BRANCHES and operand[0] in labels:
-                print(f"    /* {pc:04X} */ {name} {labels[operand[0]]}")
+                print(f"    /* {pc:04X} */ {name} {labels[operand[0]]}{warn}")
             else:
-                print(f"    /* {pc:04X} */ {name} 0x{operand[0]:02X}")
+                print(f"    /* {pc:04X} */ {name} 0x{operand[0]:02X}{warn}")
         else:
-            print(f"    /* {pc:04X} */ {name}")
+            print(f"    /* {pc:04X} */ {name}{warn}")
 
     return True
 
+
 def find_script_table_addr(f):
-    f.seek(0xA0) # ROM name in header
+    f.seek(0xA0)  # ROM name in header
     game_title = f.read(12)
 
     if game_title == b"HARVESTMOGBA":
@@ -246,28 +277,30 @@ def find_script_table_addr(f):
 
     return 0
 
+
 def main(args: list[str]):
     try:
         rom_path = args[1]
-        dump_id = int(args[2], base = 0) if len(args) > 2 else None
+        dump_id = int(args[2], base=0) if len(args) > 2 else None
 
     except IndexError:
         return f"Usage: {args[0]} ROM"
 
-    with open(rom_path, 'rb') as f:
+    with open(rom_path, "rb") as f:
         table_addr = find_script_table_addr(f)
 
         if table_addr == 0:
-            return f"Couldn't find script table (bad ROM?)"
+            return "Couldn't find script table (bad ROM?)"
 
-        if dump_id != None:
+        if dump_id is not None:
             if not dump_script(f, table_addr, dump_id):
                 return f"Failed to dump script {dump_id}"
 
         else:
-            for i in range(2000): # big numb
+            for i in range(2000):  # big numb
                 if not dump_script(f, table_addr, i):
                     break
 
-if __name__ == '__main__':
-   sys.exit(main(sys.argv))
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

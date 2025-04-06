@@ -1,5 +1,6 @@
 use crate::ir::IntValue;
-use crate::parser::Token;
+
+use super::parser::Token;
 
 use lexgen::lexer;
 
@@ -13,6 +14,7 @@ fn parse_hex(digits: &str) -> IntValue {
 
 #[derive(Debug, Default)]
 pub struct LexerState {
+    /// buffer for building string literals
     string_buf: Vec<u8>,
 }
 
@@ -40,6 +42,9 @@ lexer! {
         "switch"  = Token::KwSwitch,
         "case"    = Token::KwCase,
         "default" = Token::KwDefault,
+        "exit"    = Token::KwExit,
+        "string"  = Token::KwString,
+        "integer" = Token::KwInteger,
 
         /* punctuation */
         "(" = Token::LParen,
@@ -47,6 +52,7 @@ lexer! {
         "{" = Token::LCurly,
         "}" = Token::RCurly,
         "," = Token::Comma,
+        ":" = Token::Colon,
         ";" = Token::Semicolon,
 
         /* operators */
@@ -94,6 +100,9 @@ lexer! {
         /* comments */
         "//" => |lexer| lexer.switch(LexerRule::LineComment),
         "/*" => |lexer| lexer.switch(LexerRule::MultComment),
+
+        /* CPP line markers (treat it as a comment for now) */
+        "#" => |lexer| lexer.switch(LexerRule::LineComment),
     }
 
     rule LineComment {

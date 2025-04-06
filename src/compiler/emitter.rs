@@ -1,72 +1,15 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::fmt;
 
-use thiserror::Error;
+use crate::{
+    ast::{AssignOperation, ConstVal, Expr, NameAccess, NameRef, Stmt, SwitchCase},
+    const_scope::ConstScope,
+    ir::{CaseEnum, Ins, IntValue, JumpId, Script, StrValue, VarId},
+};
 
-use crate::ast::{AssignOperation, ConstAccess, ConstRef, ConstVal, Expr, Stmt, SwitchCase};
-use crate::ir::{CallId, CaseEnum, Ins, IntValue, JumpId, Script, StrValue, SwitchId, VarId};
-
-pub enum NameRef<'a> {
-    Const(&'a ConstVal),
-    Func(CallId),
-    Proc(CallId),
-    Var(VarId),
-}
-
-pub trait NameAccess {
-    fn lookup_name(&self, name: &str) -> Option<NameRef>;
-}
-
-impl<N: NameAccess> ConstAccess for N {
-    fn lookup_const(&self, name: &str) -> Option<ConstRef> {
-        match self.lookup_name(name) {
-            Some(NameRef::Const(ConstVal::Int(i))) => Some(ConstRef::Int(*i)),
-            Some(NameRef::Const(ConstVal::Str(s))) => Some(ConstRef::Str(s)),
-            _ => None,
-        }
-    }
-}
-
-pub struct ConstScope {
-    names: HashMap<String, ConstVal>,
-    funcs: HashMap<String, (CallId, bool)>,
-}
-
-impl ConstScope {
-    pub fn new() -> Self {
-        Self {
-            names: HashMap::new(),
-            funcs: HashMap::new(),
-        }
-    }
-
-    pub fn add_const(&mut self, name: String, val: ConstVal) {
-        self.names.insert(name, val);
-    }
-
-    pub fn add_func(&mut self, name: String, id: CallId) {
-        self.funcs.insert(name, (id, true));
-    }
-
-    pub fn add_proc(&mut self, name: String, id: CallId) {
-        self.funcs.insert(name, (id, false));
-    }
-}
-
-impl NameAccess for ConstScope {
-    fn lookup_name(&self, name: &str) -> Option<NameRef> {
-        if let Some(val) = self.names.get(name) {
-            Some(NameRef::Const(val))
-        } else {
-            match self.funcs.get(name) {
-                Some((id, true)) => Some(NameRef::Func(*id)),
-                Some((id, false)) => Some(NameRef::Proc(*id)),
-                None => None,
-            }
-        }
-    }
-}
+use super::{
+    allocator::allocate_switch_ids,
+    error::{CompileError, CompileErrors},
+};
 
 pub enum NameVal {
     Var(VarId),
@@ -102,6 +45,8 @@ impl<'a> BlockScope<'a> {
     }
 
     fn define_var(&mut self, name: String) -> Option<VarId> {
+        use std::collections::hash_map::Entry;
+
         let id = VarId(self.next_id());
 
         match self.names.entry(name) {
@@ -116,6 +61,8 @@ impl<'a> BlockScope<'a> {
     }
 
     pub fn define_const(&mut self, name: String, val: ConstVal) -> Option<()> {
+        use std::collections::hash_map::Entry;
+
         match self.names.entry(name) {
             Entry::Occupied(_) => None,
             Entry::Vacant(v) => {
@@ -137,88 +84,38 @@ impl<'a> NameAccess for BlockScope<'a> {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum CompileError {
-    #[error("Cannot redeclare '{0}' in this scope")]
-    NameAlreadyDeclared(String),
-
-    #[error("Cannot assign value to '{0}' (not a variable)")]
-    CannotAssignToNonVar(String),
-
-    #[error("Cannot evaluate {0} '{1}'")]
-    CannotEvaluateCallable(&'static str, String),
-
-    #[error("Failed to evaluate constant expression")]
-    FailedConstantEvaluation,
-
-    #[error("Expected constant integer but got string instead")]
-    ExpectedConstantIntGotStr,
-
-    #[error("Name '{0}' is not declared in this scope")]
-    NameNotDeclared(String),
-
-    #[error("Cannot call '{0}': only functions and procedures can be called")]
-    NotCallable(String),
-
-    #[error("Cannot evaluate call to '{0}': procedures do not yield results")]
-    ProcNotFunction(String),
-
-    #[error("Multiple 'default' blocks in switch")]
-    MultipleDefaults,
-}
-
-use CompileError::*;
-
-#[derive(Debug, Error)]
-pub struct CompileErrors(pub Vec<CompileError>);
-
-impl fmt::Display for CompileErrors {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for e in &self.0 {
-            write!(f, "{}", e)?;
-        }
-
-        Ok(())
-    }
-}
-
 struct Emit {
-    vec: Vec<Ins>,
-    lab: usize,
-    str: Vec<StrValue>,
-    err: Vec<CompileError>,
+    instructions: Vec<Ins>,
+    location_counter: usize,
+    strings: Vec<StrValue>,
+    errors: Vec<CompileError>,
 }
 
 impl Emit {
     fn new() -> Self {
         Self {
-            vec: Vec::new(),
-            lab: 0,
-            str: Vec::new(),
-            err: Vec::new(),
+            instructions: Vec::new(),
+            location_counter: 0,
+            strings: Vec::new(),
+            errors: Vec::new(),
         }
     }
 
     fn new_label(&mut self) -> JumpId {
-        self.lab = self.lab + 1;
-        JumpId(self.lab)
-    }
-
-    fn new_switch(&mut self) -> SwitchId {
-        self.lab = self.lab + 1;
-        SwitchId(self.lab)
+        self.location_counter = self.location_counter + 1;
+        JumpId(self.location_counter)
     }
 
     fn ins(&mut self, ins: Ins) {
-        self.vec.push(ins);
+        self.instructions.push(ins);
     }
 
     fn str_id(&mut self, string: StrValue) -> IntValue {
-        if let Some(i) = self.str.iter().position(|s| s.eq(&string)) {
+        if let Some(i) = self.strings.iter().position(|s| s.eq(&string)) {
             i as IntValue
         } else {
-            self.str.push(string);
-            (self.str.len() - 1) as IntValue
+            self.strings.push(string);
+            (self.strings.len() - 1) as IntValue
         }
     }
 
@@ -248,13 +145,22 @@ impl Emit {
     }
 
     fn expr(&mut self, scope: &BlockScope, expr: Expr) {
+        use CompileError::{
+            CannotAssignToNonVar, CannotEvaluateCallable, NameNotDeclared, NotCallable,
+            ProcNotFunction,
+        };
+
         match expr {
             Expr::Name(name) => match scope.lookup_name(&name) {
                 Some(NameRef::Var(id)) => self.ins(Ins::PushVar(id)),
                 Some(NameRef::Const(val)) => self.const_value(val),
-                Some(NameRef::Func(_)) => self.err.push(CannotEvaluateCallable("function", name)),
-                Some(NameRef::Proc(_)) => self.err.push(CannotEvaluateCallable("procedure", name)),
-                None => self.err.push(NameNotDeclared(name)),
+                Some(NameRef::Func(_)) => {
+                    self.errors.push(CannotEvaluateCallable("function", name))
+                }
+                Some(NameRef::Proc(_)) => {
+                    self.errors.push(CannotEvaluateCallable("procedure", name))
+                }
+                None => self.errors.push(NameNotDeclared(name)),
             },
 
             Expr::Int(value) => self.ins(Ins::PushInt(value)),
@@ -337,8 +243,8 @@ impl Emit {
                     self.ins(Ins::PopVar(id));
                 }
 
-                Some(_) => self.err.push(CannotAssignToNonVar(name)),
-                None => self.err.push(NameNotDeclared(name)),
+                Some(_) => self.errors.push(CannotAssignToNonVar(name)),
+                None => self.errors.push(NameNotDeclared(name)),
             },
 
             Expr::PreIncrement(name) => match scope.lookup_name(&name) {
@@ -349,8 +255,8 @@ impl Emit {
                     self.ins(Ins::PopVar(id));
                 }
 
-                Some(_) => self.err.push(CannotAssignToNonVar(name)),
-                None => self.err.push(NameNotDeclared(name)),
+                Some(_) => self.errors.push(CannotAssignToNonVar(name)),
+                None => self.errors.push(NameNotDeclared(name)),
             },
 
             Expr::PostDecrement(name) => match scope.lookup_name(&name) {
@@ -361,8 +267,8 @@ impl Emit {
                     self.ins(Ins::PopVar(id));
                 }
 
-                Some(_) => self.err.push(CannotAssignToNonVar(name)),
-                None => self.err.push(NameNotDeclared(name)),
+                Some(_) => self.errors.push(CannotAssignToNonVar(name)),
+                None => self.errors.push(NameNotDeclared(name)),
             },
 
             Expr::PreDecrement(name) => match scope.lookup_name(&name) {
@@ -373,8 +279,8 @@ impl Emit {
                     self.ins(Ins::PopVar(id));
                 }
 
-                Some(_) => self.err.push(CannotAssignToNonVar(name)),
-                None => self.err.push(NameNotDeclared(name)),
+                Some(_) => self.errors.push(CannotAssignToNonVar(name)),
+                None => self.errors.push(NameNotDeclared(name)),
             },
 
             Expr::CmpEq(ops) => {
@@ -416,9 +322,9 @@ impl Emit {
                     self.ins(Ins::Call(id));
                 }
 
-                Some(NameRef::Proc(_)) => self.err.push(ProcNotFunction(invoke.func)),
-                Some(_) => self.err.push(NotCallable(invoke.func)),
-                None => self.err.push(NameNotDeclared(invoke.func)),
+                Some(NameRef::Proc(_)) => self.errors.push(ProcNotFunction(invoke.func)),
+                Some(_) => self.errors.push(NotCallable(invoke.func)),
+                None => self.errors.push(NameNotDeclared(invoke.func)),
             },
         }
     }
@@ -441,6 +347,11 @@ impl Emit {
     }
 
     fn stmt(&mut self, scope: &mut BlockScope, stmt: Stmt) {
+        use CompileError::{
+            CannotAssignToNonVar, ExpectedConstantIntGotStr, FailedConstantEvaluation,
+            MultipleDefaults, NameAlreadyDeclared, NameNotDeclared, NotCallable,
+        };
+
         match stmt {
             Stmt::Vars(vars) => {
                 for (name, expr) in vars {
@@ -449,7 +360,7 @@ impl Emit {
                             self.assign(scope, id, expr, AssignOperation::None);
                         }
                     } else {
-                        self.err.push(NameAlreadyDeclared(name));
+                        self.errors.push(NameAlreadyDeclared(name));
                     }
                 }
             }
@@ -458,10 +369,10 @@ impl Emit {
                 for (name, expr) in inits {
                     if let Some(val) = ConstVal::eval_expr(&expr, scope) {
                         if let None = scope.define_const(name.clone(), val) {
-                            self.err.push(NameAlreadyDeclared(name));
+                            self.errors.push(NameAlreadyDeclared(name));
                         }
                     } else {
-                        self.err.push(FailedConstantEvaluation)
+                        self.errors.push(FailedConstantEvaluation)
                     }
                 }
             }
@@ -471,10 +382,10 @@ impl Emit {
                     if let NameRef::Var(id) = name_ref {
                         self.assign(scope, id, expr, op);
                     } else {
-                        self.err.push(CannotAssignToNonVar(name));
+                        self.errors.push(CannotAssignToNonVar(name));
                     }
                 } else {
-                    self.err.push(NameNotDeclared(name));
+                    self.errors.push(NameNotDeclared(name));
                 }
             }
 
@@ -503,8 +414,8 @@ impl Emit {
                     self.ins(Ins::Call(cid));
                 }
 
-                Some(_) => self.err.push(NotCallable(invoke.func)),
-                _ => self.err.push(NameNotDeclared(invoke.func)),
+                Some(_) => self.errors.push(NotCallable(invoke.func)),
+                _ => self.errors.push(NameNotDeclared(invoke.func)),
             },
 
             Stmt::If(expr, stmts) => {
@@ -546,8 +457,8 @@ impl Emit {
 
                 self.ins(Ins::Label(loop_lab));
                 self.expr(&for_scope, expr);
-                self.ins(Ins::Bne(next_lab));
-                self.ins(Ins::Jmp(body_lab));
+                self.ins(Ins::Bne(body_lab));
+                self.ins(Ins::Jmp(next_lab));
 
                 self.ins(Ins::Label(tail_lab));
                 self.stmt(&mut for_scope, tail);
@@ -569,10 +480,10 @@ impl Emit {
                 self.ins(Ins::Bne(loop_lab))
             }
 
-            Stmt::Switch(expr, cases) => {
+            Stmt::Switch(expr, cases, switch_id) => {
                 let switch_lab = self.new_label();
                 let next_lab = self.new_label();
-                let switch_id = self.new_switch();
+                // let switch_id = self.new_switch();
 
                 self.expr(scope, expr);
                 self.ins(Ins::Jmp(switch_lab));
@@ -581,26 +492,46 @@ impl Emit {
 
                 for case in cases {
                     match case {
-                        SwitchCase::Case(expr, stmts) => match ConstVal::eval_expr(&expr, scope) {
-                            Some(ConstVal::Int(val)) => {
-                                self.ins(Ins::Case(switch_id, CaseEnum::Val(val)));
-                                self.stmts(scope, stmts);
-                                self.ins(Ins::Jmp(next_lab));
+                        SwitchCase::Case(exprs, stmts) => {
+                            let ends_in_exit = matches!(stmts.last(), Some(Stmt::Exit));
+
+                            for expr in exprs {
+                                match ConstVal::eval_expr(&expr, scope) {
+                                    Some(ConstVal::Int(val)) => {
+                                        self.ins(Ins::Case(switch_id, CaseEnum::Val(val)));
+                                    }
+
+                                    Some(ConstVal::Str(_)) => {
+                                        self.errors.push(ExpectedConstantIntGotStr)
+                                    }
+
+                                    None => self.errors.push(FailedConstantEvaluation),
+                                }
                             }
 
-                            Some(ConstVal::Str(_)) => self.err.push(ExpectedConstantIntGotStr),
-                            None => self.err.push(FailedConstantEvaluation),
-                        },
+                            self.stmts(scope, stmts);
+
+                            /* don't emit jump if last stmt was exit */
+                            if !ends_in_exit {
+                                self.ins(Ins::Jmp(next_lab));
+                            }
+                        }
 
                         SwitchCase::Default(stmts) => {
                             if found_default {
-                                self.err.push(MultipleDefaults);
+                                self.errors.push(MultipleDefaults);
                             }
+
+                            let ends_in_exit = matches!(stmts.last(), Some(Stmt::Exit));
 
                             found_default = true;
                             self.ins(Ins::Case(switch_id, CaseEnum::Default));
                             self.stmts(scope, stmts);
-                            self.ins(Ins::Jmp(next_lab));
+
+                            /* don't emit jump if last stmt was exit */
+                            if !ends_in_exit {
+                                self.ins(Ins::Jmp(next_lab));
+                            }
                         }
                     }
                 }
@@ -610,6 +541,8 @@ impl Emit {
                 self.ins(Ins::Switch(switch_id));
                 self.ins(Ins::Label(next_lab));
             }
+
+            Stmt::Exit => self.ins(Ins::Exit),
         }
     }
 
@@ -622,15 +555,19 @@ impl Emit {
     }
 
     fn end(self) -> Result<Script, CompileErrors> {
-        if self.err.len() != 0 {
-            Err(CompileErrors(self.err))
+        if self.errors.len() != 0 {
+            Err(CompileErrors(self.errors))
         } else {
-            Ok(Script::new(self.vec, self.str))
+            Ok(Script::new(self.instructions, self.strings))
         }
     }
 }
 
 pub fn compile_script(stmts: Vec<Stmt>, const_scope: &ConstScope) -> Result<Script, CompileErrors> {
+    let mut stmts = stmts;
+
+    allocate_switch_ids(&mut stmts);
+
     let mut emit = Emit::new();
     emit.stmts(const_scope, stmts);
     emit.end()
