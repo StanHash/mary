@@ -4,34 +4,38 @@
 // see goodies/lib_[m]fomt.txt for a full list of known callable shapes
 func 0x106 Func106()
 func 0x117 Func117(idx)
-proc 0x105 Proc105(string_slot, animal_kind, idx)
-proc 0x01F Proc01F()
-proc 0x022 Proc022(message : string)
-proc 0x021 Proc021()
+proc 0x105 GetAnimalName(string_slot, animal_kind, idx)
+proc 0x01F TalkOpen()
+proc 0x022 TalkMessage(message : string)
+proc 0x021 TalkClose()
 proc 0x011 Proc011(arg_0, arg_1, arg_1)
 
-const CONST_36 = 0x36
+const COW = 1
+const SHEEP = 2
+
+const ACTOR_ANIMAL_0 = 0x36
 
 script 1 EventScript_1
 {
     const MESSAGE = "\xFF%is \r\nprengant!\x05"
 
     var animal_id = Func106()
-    var var_1 = CONST_36 + animal_id
+    var actor_id = ACTOR_ANIMAL_0 + animal_id
 
     if Func117(animal_id)
     {
         // cow
-        Proc105(0, 1, animal_id)
+        GetAnimalName(0, COW, animal_id)
     }
     else
     {
         // sheep
-        Proc105(0, 2, animal_id)
+        GetAnimalName(0, SHEEP, animal_id)
     }
 
-    Proc01F()
-    Proc022(MESSAGE)
-    Proc021()
-    Proc011(var_1, 1, 0)
+    TalkOpen()
+    TalkMessage(MESSAGE)
+    TalkClose()
+
+    Proc011(actor_id, 1, 0)
 }
